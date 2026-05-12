@@ -1,0 +1,168 @@
+#!/bin/sh
+
+###
+### Description: Pick wallpapers quickly
+###
+### Dependencies: hyprpaper v0.8.0+, jq, swayimg v5.0+
+###
+### NOTE: Only one instance is running at a time
+###
+### USAGE:
+###  Make sure hyprpaper is also started.
+###
+###  hyprland.conf:
+###   exec-once = /path/to/x-hpp-sess
+###
+###  or hyprland.lua:
+###   hl.on("hyprland.start", function()
+###     hl.exec_cmd("/path/to/x-hpp-sess")
+###   end)
+###
+###  command:
+###   /path/to/swi-hyprpaper <path> <key> [mode]
+###
+###    arguments:
+###     <path>
+###      Path to wallpapers.
+###
+###     <key>
+###      The key binding to apply a wallpaper.
+###      The key name can be obtained with the xkbcli tool: xkbcli
+###      interactive-wayland. One or more key modifiers (Ctrl, Alt,
+###      Shift) can be specified in the keybind name, and if they
+###      are specified their names must be written exactly as Ctrl,
+###      Shift, Alt (even though their names shown in the tool may
+###      look different). Many keys have special names, e.g., "!" is
+###      called "exclam", keybind name written as: Shift+exclam.
+###      Keybinds can also be mouse buttons or scroll actions, with
+###      predefined names: MouseLeft, MouseRight, MouseMiddle,
+###      MouseSide, MouseExtra, ScrollUp, ScrollDown, ScrollLeft,
+###      ScrollRight.
+###      This might override a default keybind of the image
+###      viewer or a configured keybind.
+###
+###     [mode]
+###      Determines how to display the image.
+###      Values: contain|cover|tile|fill, optional and defaults to `cover`.
+###
+
+LOCKFILE=/tmp/swi-hyprpaper.lock
+
+if [ -f "$LOCKFILE" ]; then
+  PID=$(tr -d '\n' < $LOCKFILE 2>/dev/null)
+  if [ "$PID" != "$$" ] && kill -0 "$PID" 2>/dev/null; then
+    if [ $(basename $(tr '\0' ' ' < /proc/$PID/cmdline | awk '{print $2}')) = 'swi-hyprpaper' ]; then
+      echo "Another instance is running (pid: $PID)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+echo "$$" > $LOCKFILE
+
+FREE="rm -f $LOCKFILE"
+trap "$FREE" EXIT
+
+WPPDIR=$1
+SWI_HPP_HOTKEY=$2
+FIT_MODE=$3 # contain|cover|tile|fill, optional and defaults to `cover`
+
+if [ -z "$WPPDIR" ]; then
+  echo '-----------------------------------------------------------'
+  echo 'MISSING first argument: a wallpaper directory.'
+fi
+
+if [ -z "$SWI_HPP_HOTKEY" ]; then
+  echo '-----------------------------------------------------------'
+  echo 'MISSING second argument: the keybind to apply wallpaper.'
+  printf '\n'
+  echo 'The key name can be obtained with the xkbcli tool: xkbcli'
+  echo 'interactive-wayland. One or more key modifiers (Ctrl, Alt,'
+  echo 'Shift) can be specified in the keybind name, and if they'
+  echo 'are specified their names must be written exactly as Ctrl,'
+  echo 'Shift, Alt (even though their names shown in the tool may'
+  echo 'look different). Many keys have special names, e.g., "!" is'
+  echo 'called "exclam", keybind name written as: Shift+exclam.'
+  echo 'Keybinds can also be mouse buttons or scroll actions, with'
+  echo 'predefined names: MouseLeft, MouseRight, MouseMiddle,'
+  echo 'MouseSide, MouseExtra, ScrollUp, ScrollDown, ScrollLeft,'
+  echo 'ScrollRight.'
+  printf '\n'
+  echo 'NOTE: This might override a default keybind of the image'
+  echo 'viewer or a configured keybind.'
+  echo '-----------------------------------------------------------'
+  exit 1
+fi
+
+if ! [ -d "$WPPDIR" ]; then
+  echo "\"$WPPDIR\" does not exist." >&2
+  exit 1
+elif ! command -v swayimg >/dev/null; then
+  echo "swayimg is not installed." >&2
+  exit 1
+fi
+
+hyprpaper_ready=false
+for pid in $(pgrep -x hyprpaper); do
+  if [ $(basename $(readlink -f /proc/$pid/exe)) = 'hyprpaper' ]; then
+    hyprpaper_ready=true
+    break
+  fi
+done
+
+if ! $hyprpaper_ready; then
+  command -v hyprpaper >/dev/null || { echo 'hyprpaper is not installed.' >&2; exit 1; }
+  echo "hyprpaper is not running." >&2
+  exit 1
+fi
+
+FOCUSED_MONITOR=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+ec=$?
+[ $ec -eq 0 ] || exit $ec
+
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+mkdir -p "$XDG_CACHE_HOME/hyprpaper/x-hpp-sess"
+CACHE_FILE="$XDG_CACHE_HOME/hyprpaper/x-hpp-sess/${FOCUSED_MONITOR}.current_wallpaper"
+read ACTIVE_WALL < "$CACHE_FILE"
+
+swayimg \
+  --gallery \
+  --class=swayimg-hyprpaper \
+  --execute="
+              swayimg.gallery.enable_pstore(true)
+
+              swayimg.gallery.set_thumb_size(200)
+
+              swayimg.viewer.on_key(\"${SWI_HPP_HOTKEY}\", function()
+              os.execute(\"echo \" .. swayimg.viewer.get_image().path .. \", ${FIT_MODE} > ${CACHE_FILE}\")
+              end)
+
+              swayimg.slideshow.on_key(\"${SWI_HPP_HOTKEY}\", function()
+              os.execute(\"echo \" .. swayimg.slideshow.get_image().path .. \", ${FIT_MODE} > ${CACHE_FILE}\")
+              end)
+
+              swayimg.gallery.on_key(\"${SWI_HPP_HOTKEY}\", function()
+              os.execute(\"echo \" .. swayimg.gallery.get_image().path .. \", ${FIT_MODE} > ${CACHE_FILE}\")
+              end)
+            " \
+  "$WPPDIR" &
+
+swayimg_hyprpaper_pid=$!
+
+until [ $(hyprctl activewindow -j | jq -r '.class') = 'swayimg-hyprpaper' ]; do :; done
+hyprctl dispatch movecursortocorner 0
+hyprctl dispatch "hl.dsp.cursor.move_to_corner({ corner = 0 })"
+set -- $(hyprctl cursorpos | tr -d ',')
+X=$1; Y=$2
+hyprctl dispatch movecursor $(( X+5 )) $(( Y-5 ))
+hyprctl dispatch "hl.dsp.cursor.move({ x=$(( X+5 )), y=$(( Y-5 )) })"
+
+while kill -0 "$swayimg_hyprpaper_pid" 2>/dev/null; do
+  read CURRENT_WALL < "$CACHE_FILE" || \
+    { sleep 0.2; continue; } # reread if the data of file is not yet complete
+  if [ "$CURRENT_WALL" != "$ACTIVE_WALL" ]; then
+    ACTIVE_WALL=$CURRENT_WALL
+    hyprctl hyprpaper wallpaper "${FOCUSED_MONITOR}, ${ACTIVE_WALL}"
+  fi
+  sleep 0.2
+done

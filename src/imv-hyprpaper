@@ -1,0 +1,119 @@
+#!/bin/sh
+
+###
+### Description: Pick wallpapers quickly
+###
+### Dependencies: hyprpaper v0.8.0+, imv, jq
+###
+### NOTE: Only one instance is running at a time
+###
+### USAGE:
+###  Make sure hyprpaper is also started.
+###
+###  hyprland.conf:
+###   exec-once = /path/to/x-hpp-sess
+###
+###  or hyprland.lua:
+###   hl.on("hyprland.start", function()
+###     hl.exec_cmd("/path/to/x-hpp-sess")
+###   end)
+###
+###  command:
+###   /path/to/imv-hyprpaper <path> [mode]
+###
+###    arguments:
+###     <path>
+###      Path to wallpapers.
+###
+###     [mode]
+###      Determines how to display the image.
+###      Values: contain|cover|tile|fill, optional and defaults to `cover`.
+###
+
+LOCKFILE=/tmp/imv-hyprpaper.lock
+
+if [ -f "$LOCKFILE" ]; then
+  PID=$(tr -d '\n' < $LOCKFILE 2>/dev/null)
+  if [ "$PID" != "$$" ] && kill -0 "$PID" 2>/dev/null; then
+    if [ $(basename $(tr '\0' ' ' < /proc/$PID/cmdline | awk '{print $2}')) = 'imv-hyprpaper' ]; then
+      echo "Another instance is running (pid: $PID)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+echo "$$" > $LOCKFILE
+
+FREE="rm -f $LOCKFILE"
+trap "$FREE" EXIT
+
+WPPDIR=$1
+FIT_MODE=$2 # contain|cover|tile|fill, optional and defaults to `cover`
+
+if [ -z "$WPPDIR" ]; then # check first argument
+  echo 'Missing first argument: a wallpaper directory.' >&2
+  exit 1
+fi
+
+if ! [ -d "$WPPDIR" ]; then # check wallpaper directory
+  echo "\"$WPPDIR\" does not exist." >&2
+  exit 1
+elif ! command -v imv >/dev/null; then # check imv
+  echo "imv is not installed." >&2
+  exit 1
+fi
+
+hyprpaper_ready=false
+for pid in $(pgrep -x hyprpaper); do
+  if [ $(basename $(readlink -f /proc/$pid/exe)) = 'hyprpaper' ]; then
+    hyprpaper_ready=true
+    break
+  fi
+done
+
+if ! $hyprpaper_ready; then # check hyprpaper
+  command -v hyprpaper >/dev/null || { echo 'hyprpaper is not installed.' >&2; exit 1; }
+  echo "hyprpaper is not running." >&2
+  exit 1
+fi
+
+FOCUSED_MONITOR=$(hyprctl monitors -j | jq -r '.[] | select(.focused) | .name')
+ec=$?
+[ $ec -eq 0 ] || exit $ec # check jq
+
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+mkdir -p "$XDG_CACHE_HOME/hyprpaper/x-hpp-sess"
+CACHE_FILE="$XDG_CACHE_HOME/hyprpaper/x-hpp-sess/${FOCUSED_MONITOR}.current_wallpaper"
+read ACTIVE_WALL < "$CACHE_FILE"
+
+# using a separate config file for imv (via its environment variable)
+imv_config=/tmp/imv_hyprpaper_config
+cat <<'EOF' > $imv_config
+[options]
+overlay_text = " [$imv_current_index/$imv_file_count] [${imv_width}x$imv_height], pick (p) | quit (q) | prev (left) | next (right) "
+overlay_text_color = eee8d5
+overlay_font = Monospace:10
+overlay_background_alpha = 78
+EOF
+
+export CACHE_FILE
+export imv_config
+export FIT_MODE
+
+imv \
+  -w imv_hyprpaper \
+  -d \
+  -c 'bind p exec echo "${imv_current_file}, ${FIT_MODE}" > "$CACHE_FILE"' \
+  "$WPPDIR" &
+
+imv_hyprpaper_pid=$!
+
+while kill -0 "$imv_hyprpaper_pid" 2>/dev/null; do
+  read CURRENT_WALL < "$CACHE_FILE" || \
+    { sleep 0.2; continue; } # reread if the data of file is not yet complete
+  if [ "$CURRENT_WALL" != "$ACTIVE_WALL" ]; then
+    ACTIVE_WALL=$CURRENT_WALL
+    hyprctl hyprpaper wallpaper "${FOCUSED_MONITOR}, ${ACTIVE_WALL}"
+  fi
+  sleep 0.2
+done

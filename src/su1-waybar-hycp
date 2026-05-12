@@ -1,0 +1,118 @@
+#!/bin/sh
+
+###
+### Description:
+###  Sends SIGUSR1 to Waybar based on cursor position
+###  being on a screen edge or at one of the endpoints
+###  of a screen edge.
+###  The action performed by Waybar when it receives
+###  SIGUSR1 is determined by the `on-sigusr1` config
+###  option (defaults to `toggle`).
+###
+### Dependencies: jq
+###
+### USAGE:
+###  command:
+###   /path/to/su1-waybar-hycp <id> [mode]
+###
+###    arguments:
+###     <id>
+###      Screen edge id (1-4):
+###       -------------
+###       |     1     |
+###       | 2       4 |
+###       |     3     |
+###       -------------
+###
+###     [mode]
+###      Use only the endpoints of the selected screen edge:
+###       any non-zero non-negative integer: enabled.
+###       0: disabled.
+###      Optional and defaults to disabled.
+###
+###  tip:
+###   hyprland.conf:
+###    exec-once = /path/to/su1-waybar-hycp
+###
+###   or hyprland.lua:
+###    hl.on("hyprland.start", function()
+###      hl.exec_cmd("/path/to/su1-waybar-hycp")
+###    end)
+###
+
+trap 'exit 0' TERM
+
+edge_id=${1:-1} # defaults to 1
+endpoints_only=${2:-0} # defaults to 0
+
+case $edge_id in
+  *[!0-9]*) printf "error: first argument must be a non-negative integer\n" >&2; exit 1 ;;
+esac
+
+case $endpoints_only in
+  *[!0-9]*) printf "error: second argument must be a non-negative integer\n" >&2; exit 1 ;;
+esac
+
+while pgrep -x Hyprland >/dev/null 2>&1; do # terminate on exit
+  pgrep -x waybar >/dev/null 2>&1 || { sleep 2; continue; } # idle when Waybar terminates (wait)
+
+  [ "$(hyprctl activewindow | awk -F': ' '
+  /^[[:space:]]*fullscreen:/ {fs=$2; exit}
+  END {print (fs==2 || fs==3) ? 1 : 0}')" -eq 1 ] && sleep 2 && continue # idle when on fullscreen
+
+  hypr_cursorpos_vec=$(hyprctl cursorpos | tr -d ',') || { sleep 2; continue; }
+  # shellcheck disable=SC2086
+  set -- $hypr_cursorpos_vec
+  X=$1; Y=$2
+
+  lhs=$Y; rhs=0 # any edge_id number
+  if [ "$edge_id" -eq 2  ]; then # edge_id: 2
+    lhs=$X; rhs=0
+  elif [ "$edge_id" -eq 3 ]; then # edge_id: 3
+    lhs=$Y
+    # shellcheck disable=SC2046
+    set -- $(hyprctl monitors -j | jq '.[] | select(.focused == true) | .height, .scale')
+    height=$1; scale=$2
+    rhs=$(awk "BEGIN { printf \"%d\", $height / $scale - 1 }")
+  elif [ "$edge_id" -eq 4 ]; then # edge_id: 4
+    lhs=$X
+    # shellcheck disable=SC2046
+    set -- $(hyprctl monitors -j | jq '.[] | select(.focused == true) | .width, .scale')
+    width=$1; scale=$2
+    rhs=$(awk "BEGIN { printf \"%d\", $width / $scale - 1 }")
+  fi
+
+  if [ "$lhs" -eq "$rhs" ]; then
+
+    if [ "$endpoints_only" -eq 0 ]; then
+      killall -SIGUSR1 waybar
+      sleep 0.5; sleep 0.5; continue
+    fi
+
+    if [ "$lhs" -eq "$X" ]; then
+      if [ -z "$height" ]; then
+        # shellcheck disable=SC2046
+        set -- $(hyprctl monitors -j | jq '.[] | select(.focused == true) | .height, .scale')
+        height=$1; scale=$2
+      fi
+
+      if [ "$Y" -eq 0 ] || [ "$Y" -eq "$(awk "BEGIN { printf \"%d\", $height / $scale - 1 }")" ]; then
+        killall -SIGUSR1 waybar
+        sleep 0.5
+      fi
+    else # lhs = Y
+      if [ -z "$width" ]; then
+        # shellcheck disable=SC2046
+        set -- $(hyprctl monitors -j | jq '.[] | select(.focused == true) | .width, .scale')
+        width=$1; scale=$2
+      fi
+
+      if [ "$X" -eq 0 ] || [ "$X" -eq "$(awk "BEGIN { printf \"%d\", $width / $scale - 1 }")" ]; then
+        killall -SIGUSR1 waybar
+        sleep 0.5
+      fi
+    fi
+  fi
+
+  sleep 0.5
+done

@@ -1,0 +1,104 @@
+#!/bin/sh
+
+###
+### Description: Make requests to search engines
+###
+### Dependencies: jq, rofi, socat, xdg-utils
+###
+### USAGE: no arguments
+###
+
+has_socat=true
+if ! command -v socat >/dev/null; then
+  has_socat=false
+  printf "warning: socat missing, handler window positioning may be unreliable.\n" >&2
+fi
+
+query=$(rofi -dmenu \
+  -theme-str 'configuration { font: "sans 17"; }' \
+  -theme-str 'window { children: [ inputbar ]; }' \
+  -theme-str 'inputbar { children: [ prompt, entry ]; }' \
+  -theme-str 'entry { placeholder: "[b;|d;|g;|gh;|gl;|y;]<query>"; }' \
+  -p "search: ")
+
+[ -z "$query" ] && exit
+
+# query parsing...
+
+case "$query" in
+  "b;"*) query="https://search.brave.com/search?q=$query" ;;
+  "d;"*) query="https://duckduckgo.com/?q=${query#"d;"}" ;;
+  "g;"*) query="https://google.com/search?q=${query#"g;"}" ;;
+  "gh;"*) query="https://github.com/search?q=${query#"gh;"}" ;;
+  "gl;"*) query="https://gitlab.com/search?search=${query#"gl;"}" ;;
+  "y;"*) query="https://youtube.com/results?search_query=${query#"y;"}" ;;
+  *)
+    engine=$(printf "%s\n" \
+    brave duckduckgo \
+    google github \
+    gitlab youtube | \
+    rofi -dmenu -matching prefix -i -p "engine")
+
+    case "$engine" in
+      "brave") query="https://search.brave.com/search?q=$query" ;;
+      "duckduckgo") query="https://duckduckgo.com/?q=$query" ;;
+      "google") query="https://google.com/search?q=$query" ;;
+      "github") query="https://github.com/search?q=$query" ;;
+      "gitlab") query="https://gitlab.com/search?search=$query" ;;
+      "youtube") query="https://youtube.com/results?search_query=$query" ;;
+      *) exit 0
+    esac
+    ;;
+esac
+
+# handler window positioning...
+
+handler_name=$(xdg-mime query default x-scheme-handler/https | sed 's/\.desktop$//')
+[ -z "$handler_name" ] && printf "no https handler found.\n" >&2 && exit 1
+
+current_workspace=$(hyprctl monitors -j | \
+  jq '.[] | select(.focused == true) |
+  if .specialWorkspace.id == 0 then
+    .activeWorkspace.id
+  else
+    .specialWorkspace.id
+  end')
+
+target_window=$(hyprctl clients -j | jq -r --arg HH "$handler_name" --argjson CWS "$current_workspace" \
+  '[.[] | select(.class == $HH and .workspace.id == $CWS)] |
+  sort_by(.focusHistoryID) |
+  first |
+  .address')
+
+if [ "$target_window" != "null" ]; then
+  hyprctl dispatch focuswindow address:"$target_window"
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:${target_window}\" })"
+  until [ "$(hyprctl activewindow -j | jq -r '.address')" = "$target_window" ]; do :; done
+
+  xdg-open "$query"
+else
+  XDG_DATA_HOME=${XDG_DATA_HOME:-"$HOME/.local/share"}
+  XDG_DATA_DIRS=${XDG_DATA_DIRS:-"/usr/local/share:/usr/share"}
+
+  IFS=:
+  for dir in "$XDG_DATA_HOME" $XDG_DATA_DIRS; do
+    handler_desktop_entry="$dir/applications/${handler_name}.desktop"
+    [ -f "$handler_desktop_entry" ] && \
+      cmd=$(grep '^Exec=' "$handler_desktop_entry" | head -1 | sed 's/Exec=//') && break
+  done
+  unset IFS
+
+  [ -z "$cmd" ] && printf "no https handler desktop entry found.\n" >&2 && exit 1
+
+  if $has_socat; then
+    socat -U - UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock | \
+      sed "/openwindow>>.*,$handler_name,/q" &
+    pid=$!
+    $cmd &
+    wait $pid
+  else
+    $cmd &
+  fi
+
+  xdg-open "$query"
+fi

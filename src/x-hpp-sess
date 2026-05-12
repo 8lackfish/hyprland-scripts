@@ -1,0 +1,37 @@
+#!/bin/sh
+
+###
+### Description: Start the x-hyprpaper session
+###
+### Dependencies: jq
+###
+### USAGE: no arguments
+###
+
+jq --version >/dev/null || exit $?
+
+hyprpaper_ready=false
+for pid in $(pgrep -x hyprpaper); do
+  if [ $(basename $(readlink -f /proc/$pid/exe)) = 'hyprpaper' ]; then
+    hyprpaper_ready=true
+    break
+  fi
+done
+
+if ! $hyprpaper_ready; then
+  command -v hyprpaper >/dev/null || { echo 'hyprpaper is not installed.' >&2; exit 1; }
+fi
+
+monitors=$(hyprctl monitors -j | jq -r '.[].name')
+for monitor in $monitors; do
+  read current_wallpaper < "${XDG_CACHE_HOME:-$HOME/.cache}/hyprpaper/x-hpp-sess/$monitor.current_wallpaper" || continue
+  i=0
+	until hyprctl hyprpaper wallpaper "${monitor}, ${current_wallpaper}" >/dev/null 2>&1; do # ensure (hyprpaper) ipc is ready
+    i=$((i + 1))
+    if [ $i -ge 250 ]; then
+      echo 'timed out waiting for hyprpaper IPC.' >&2
+      exit 1
+    fi
+    sleep 0.01
+	done
+done
