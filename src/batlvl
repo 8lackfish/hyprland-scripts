@@ -1,0 +1,23 @@
+#!/bin/sh
+
+###
+### Description: Displays the battery level as a percentage.
+###
+### USAGE: no arguments
+###
+
+total=0
+count=0
+
+for c in /sys/class/power_supply/*/capacity; do
+  type_file=$(dirname "$c")/type
+  if [ "$(cat "$type_file" 2>/dev/null)" = "Battery" ]; then
+    total=$((total + $(cat $c)))
+    count=$((count + 1))
+  fi
+done
+
+if [ $count -gt 0 ]; then
+  avg=$((total / count))
+  printf "%s%%\n" "$avg"
+fi
