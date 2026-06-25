@@ -8,7 +8,7 @@
 | [imv-hyprpaper](src/imv-hyprpaper) | Pick wallpapers quickly. | sh | hyprpaper v0.8.0+, imv, jq |
 | [rofi-search](src/rofi-search) | Make requests to search engines. | sh | jq, rofi, socat, xdg-utils |
 | [su1-waybar-hycp](src/su1-waybar-hycp) | Sends SIGUSR1 to Waybar based on cursor position being on a screen edge or at one of the endpoints of a screen edge. The action performed by Waybar when it receives SIGUSR1 is determined by the `on-sigusr1` config option (defaults to `toggle`). | sh | jq |
-| [swi-hyprpaper](src/swi-hyprpaper) | Pick wallpapers quickly. | sh | hyprpaper v0.8.0+, jq, swayimg v5.0+ |
+| [swi-hyprpaper](src/swi-hyprpaper) | Pick wallpapers quickly. | sh | hyprpaper v0.8.0+, jq, swayimg v5.3+ |
 | [x-hpp-sess](src/x-hpp-sess) | Start the x-hyprpaper session. | sh | jq |
 
 ## Usage

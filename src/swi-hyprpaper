@@ -3,7 +3,7 @@
 ###
 ### Description: Pick wallpapers quickly
 ###
-### Dependencies: hyprpaper v0.8.0+, jq, swayimg v5.0+
+### Dependencies: hyprpaper v0.8.0+, jq, swayimg v5.3+
 ###
 ### NOTE: Only one instance is running at a time
 ###
@@ -127,7 +127,7 @@ read ACTIVE_WALL < "$CACHE_FILE"
 
 swayimg \
   --gallery \
-  --class=swayimg-hyprpaper \
+  --appid=swayimg-hyprpaper \
   --execute="
               swayimg.gallery.enable_pstore(true)
 
