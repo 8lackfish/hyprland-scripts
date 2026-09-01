@@ -3,7 +3,7 @@
 ###
 ### Description: Pick wallpapers quickly
 ###
-### Dependencies: hyprpaper v0.8.0+, jq, swayimg v5.3+
+### Dependencies: hyprpaper v0.8.0+, jq, swayimg v5.5+
 ###
 ### NOTE: Only one instance is running at a time
 ###
@@ -129,9 +129,9 @@ swayimg \
   --gallery \
   --appid=swayimg-hyprpaper \
   --execute="
-              swayimg.gallery.enable_pstore(true)
+              swayimg.gallery.pstore = true
 
-              swayimg.gallery.set_thumb_size(200)
+              swayimg.gallery.thumb_size = 200
 
               swayimg.viewer.on_key(\"${SWI_HPP_HOTKEY}\", function()
               os.execute(\"echo \" .. swayimg.viewer.get_image().path .. \", ${FIT_MODE} > ${CACHE_FILE}\")
