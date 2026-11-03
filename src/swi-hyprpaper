@@ -150,12 +150,24 @@ swayimg \
 swayimg_hyprpaper_pid=$!
 
 until [ $(hyprctl activewindow -j | jq -r '.class') = 'swayimg-hyprpaper' ]; do :; done
+
+ANIMATIONS_ENABLED=$(hyprctl getoption animations:enabled | sed -n 's/^bool: //p')
+
+if [ "$ANIMATIONS_ENABLED" = "true" ]; then
+  # temporarily disable window animations to position the cursor
+  hyprctl dispatch "hl.dsp.window.set_prop({ prop = 'no_anim', value = '1' })"
+fi
+
 hyprctl dispatch movecursortocorner 0
 hyprctl dispatch "hl.dsp.cursor.move_to_corner({ corner = 0 })"
 set -- $(hyprctl cursorpos | tr -d ',')
 X=$1; Y=$2
 hyprctl dispatch movecursor $(( X+5 )) $(( Y-5 ))
 hyprctl dispatch "hl.dsp.cursor.move({ x=$(( X+5 )), y=$(( Y-5 )) })"
+
+if [ "$ANIMATIONS_ENABLED" = "true" ]; then
+  hyprctl dispatch "hl.dsp.window.set_prop({ prop = 'no_anim', value = '0' })"
+fi
 
 while kill -0 "$swayimg_hyprpaper_pid" 2>/dev/null; do
   read CURRENT_WALL < "$CACHE_FILE" || \
