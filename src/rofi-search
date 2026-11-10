@@ -58,14 +58,14 @@ handler_name=$(xdg-mime query default x-scheme-handler/https | sed 's/\.desktop$
 
 current_workspace=$(hyprctl monitors -j | \
   jq '.[] | select(.focused == true) |
-  if .specialWorkspace.id == 0 then
-    .activeWorkspace.id
+  if (.specialWorkspace.address // "") == "" then
+    .activeWorkspace.address
   else
-    .specialWorkspace.id
+    .specialWorkspace.address
   end')
 
 target_window=$(hyprctl clients -j | jq -r --arg HH "$handler_name" --argjson CWS "$current_workspace" \
-  '[.[] | select(.class == $HH and .workspace.id == $CWS)] |
+  '[.[] | select(.class == $HH and .workspace.address == $CWS)] |
   sort_by(.focusHistoryID) |
   first |
   .address')
